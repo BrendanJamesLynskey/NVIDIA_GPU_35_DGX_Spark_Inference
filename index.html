@@ -765,7 +765,7 @@
     <div class="tags">
         <span class="tag">Spark</span><span class="tag">vLLM</span><span class="tag">Ollama</span>
         <span class="tag">NIM</span><span class="tag">TRT-LLM</span>
-        <span class="tag">MX-FP4</span><span class="tag">FP8</span><span class="tag">AWQ-INT4</span>
+        <span class="tag">NVFP4</span><span class="tag">MX-FP4</span><span class="tag">FP8</span><span class="tag">AWQ-INT4</span>
         <span class="tag">KV cache</span><span class="tag">Batch</span>
     </div>
 
@@ -806,7 +806,7 @@
 <section class="slide" id="slide-01">
     <div class="slide-number">01</div>
     <h2>The Bandwidth-Bound Reality</h2>
-    <p>Spark's GPU peaks at ~250 TFLOPS dense FP8. Its memory bandwidth is ~273 GB/s. <strong>The arithmetic intensity ratio (FLOPS / byte) is roughly 250000 / 273 = 916</strong>, meaning the GPU computes ~916 FLOPs per byte fetched at peak. LLM decode is a single matrix-vector multiply per layer; arithmetic intensity is ~2 (one FLOP per weight, two operands per result). <strong>You will be memory-bound by a factor of 400&times;</strong> on decode.</p>
+    <p>Spark's GB10 GPU peaks at ~1 PFLOPS sparse FP4 (~500 TFLOPS dense FP4, ~250 TFLOPS dense FP8). Its memory bandwidth is ~273 GB/s. <strong>The arithmetic intensity ratio (FLOPS / byte) at FP8 is roughly 250000 / 273 = 916</strong>, meaning the GPU computes ~916 FLOPs per byte fetched at peak. LLM decode is a single matrix-vector multiply per layer; arithmetic intensity is ~2 (one FLOP per weight, two operands per result). <strong>You will be memory-bound by a factor of 400&times;</strong> on decode.</p>
 
     <div class="callout">
         <div class="callout-label">Implication</div>
@@ -832,7 +832,7 @@
                 <tr><td>Llama-3.1 13 B (deprecated)</td><td>~9 tok/s</td><td>~18 tok/s</td><td>~32 tok/s</td><td>~30 tok/s</td></tr>
                 <tr><td>Mixtral 8&times;7 B (active 13 B)</td><td>~9 tok/s</td><td>~18 tok/s</td><td>~32 tok/s</td><td>~30 tok/s</td></tr>
                 <tr><td>Llama-3.3 70 B</td><td>OOM</td><td>~3.3 tok/s</td><td>~6.7 tok/s</td><td>~6 tok/s</td></tr>
-                <tr><td>Llama-3.4-Nemotron 70 B + tool</td><td>OOM</td><td>~3.0 tok/s</td><td>~6.0 tok/s</td><td>~5.5 tok/s</td></tr>
+                <tr><td>Llama-3.1-Nemotron 70 B + tool</td><td>OOM</td><td>~3.0 tok/s</td><td>~6.0 tok/s</td><td>~5.5 tok/s</td></tr>
                 <tr><td>Mixtral 8&times;22 B (active 39 B)</td><td>OOM</td><td>~3.0 tok/s</td><td>~6.0 tok/s</td><td>~5.5 tok/s</td></tr>
                 <tr><td>DeepSeek-V3 671 B (active 37 B)</td><td>OOM</td><td>~3.1 tok/s</td><td>~6.3 tok/s</td><td>OOM (full weights too big)</td></tr>
                 <tr><td>Llama-3.1 405 B</td><td>OOM</td><td>OOM</td><td>OOM (single Spark)</td><td>OOM</td></tr>
@@ -877,7 +877,8 @@
             <tbody>
                 <tr><td>BF16</td><td>2.0</td><td>native</td><td>0% (reference)</td><td>Anything &le; ~50 B that fits.</td></tr>
                 <tr><td>FP8 (E4M3)</td><td>1.0</td><td>native</td><td>~0.5% perplexity uplift typical</td><td>Default for 60&ndash;120 B.</td></tr>
-                <tr><td><strong>MX-FP4</strong></td><td><strong>~0.55</strong></td><td><strong>native</strong></td><td>~1.5&ndash;3% perplexity uplift</td><td><strong>Default for 70 B+ on Spark.</strong> Only Blackwell does it natively.</td></tr>
+                <tr><td><strong>NVFP4</strong></td><td><strong>~0.5</strong></td><td><strong>native</strong></td><td>~0.5&ndash;1.5% perplexity uplift</td><td><strong>Default in TensorRT-LLM / Transformer Engine.</strong> 16-element blocks, E4M3 scale + per-tensor FP32 scale; more accurate than MX-FP4.</td></tr>
+                <tr><td><strong>MX-FP4</strong></td><td><strong>~0.55</strong></td><td><strong>native</strong></td><td>~1.5&ndash;3% perplexity uplift</td><td>Open OCP standard, 32-element blocks, E8M0 scale. <strong>Default for 70 B+ on Spark</strong> when an NVFP4 checkpoint isn't available.</td></tr>
                 <tr><td>AWQ-INT4</td><td>~0.6</td><td>via Marlin kernel (not TC native, but fast)</td><td>~1&ndash;4%</td><td>If MX-FP4 not available; ubiquitous on Hugging Face.</td></tr>
                 <tr><td>GPTQ-INT4</td><td>~0.6</td><td>via vLLM</td><td>~1&ndash;5%</td><td>Older quant; superseded by AWQ for new models.</td></tr>
                 <tr><td>GGUF Q5_K_M</td><td>~0.7</td><td>llama.cpp only</td><td>~0.5%</td><td>Ollama users; high-quality K-quant.</td></tr>
@@ -889,7 +890,7 @@
 
     <div class="callout">
         <div class="callout-label">Spark default</div>
-        <p>For any 70 B-class model, start with <strong>MX-FP4</strong> if a checkpoint exists (Llama-3.3-70B, DeepSeek-V3, Mistral-Large all ship MX-FP4 since 2025). Fall back to <strong>AWQ-INT4</strong> if not. <strong>FP8</strong> is fine for 30&ndash;50 B that fit comfortably. Skip BF16 unless debugging.</p>
+        <p>For any 70 B-class model, start with <strong>NVFP4</strong> via TensorRT-LLM / NIM if a checkpoint exists; otherwise <strong>MX-FP4</strong> (Llama-3.3-70B, DeepSeek-V3, Mistral-Large all ship FP4 since 2025). Fall back to <strong>AWQ-INT4</strong> if neither is available. <strong>FP8</strong> is fine for 30&ndash;50 B that fit comfortably. Skip BF16 unless debugging.</p>
     </div>
 </section>
 
@@ -978,7 +979,7 @@
 <section class="slide" id="slide-09">
     <div class="slide-number">09</div>
     <h2>Two-Spark Inference &mdash; Pipeline Parallel</h2>
-    <p>The 200 GbE QSFP28 port gives Spark pairs ~25 GB/s/dir RDMA. That's enough for pipeline parallel (PP=2) which only ships hidden states between stages, not full weight matrices.</p>
+    <p>The 200 Gb/s ConnectX-7 NIC gives Spark pairs ~25 GB/s/dir RDMA. That's enough for pipeline parallel (PP=2) which only ships hidden states between stages, not full weight matrices.</p>
 
     <div class="diagram-grid cols-2">
         <div class="diagram-panel accent-border">
@@ -988,7 +989,7 @@
                 <li>Effective memory: 256 GB</li>
                 <li>120 B model in MX-FP4 (~66 GB) fits easily</li>
                 <li>200 B in MX-FP4 (~110 GB) fits with KV cache room</li>
-                <li>Llama-3.4-405B in MX-FP4 (~220 GB) fits but tight</li>
+                <li>Llama-3.1-405B in MX-FP4 (~220 GB) fits but tight</li>
             </ul>
         </div>
         <div class="diagram-panel accent-border">
@@ -1024,7 +1025,7 @@ docker run --gpus all --network host \
         <li><strong>nsys profile</strong>: full Nsight Systems trace works on Spark; useful for diagnosing pipeline stalls in vLLM.</li>
         <li><strong>genai-perf</strong>: from Triton SDK image; benchmarks throughput/latency against any OpenAI-compatible endpoint.</li>
         <li><strong>htop</strong>: CPU side; X925/A725 cores show as 20 logical CPUs.</li>
-        <li><strong>iperf3</strong>: between two Sparks across the 200 GbE port; sanity-check link speed before benchmarking PP.</li>
+        <li><strong>iperf3</strong>: between two Sparks across the 200 Gb/s NIC; sanity-check link speed before benchmarking PP.</li>
     </ul>
 
     <p>Production observability: ship DCGM metrics to Prometheus via <code>nvidia/dcgm-exporter</code> container, scrape from your home Grafana. ~20 lines of docker-compose.</p>
@@ -1065,7 +1066,7 @@ docker run --gpus all --network host \
                 <option value="8">Llama-3.1 8 B</option>
                 <option value="32">Llama-3.x 32 B</option>
                 <option value="70" selected>Llama-3.3 70 B</option>
-                <option value="120">Llama-3.4-Nemotron 120 B</option>
+                <option value="120">Llama-3.1-Nemotron 120 B</option>
                 <option value="200">Mistral-Large-2 200 B</option>
                 <option value="405">Llama-3.1 405 B</option>
                 <option value="671">DeepSeek-V3 671 B (MoE, active 37 B)</option>
